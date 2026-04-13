@@ -1,0 +1,70 @@
+{
+  "name": "horoscope",
+  "author": "changing-k-tanaka",
+  "version": "1.0.0",
+  "keywords": ["moonlit", "watchface", "starry-sky", "comet", "earthlit", "earth", "moon", "shooting-star", "star"],
+  "private": true,
+  "dependencies": {},
+  "pebble": {
+    "displayName": "Moonlit",
+    "uuid": "9eaaf995-b74e-4055-80e1-1aae599209fa",
+    "sdkVersion": "3",
+    "enableMultiJS": true,
+    "targetPlatforms": [
+      "basalt",
+      "chalk",
+      "emery",
+      "gabbro"
+    ],
+    "watchapp": {
+      "watchface": true
+    },
+    "capabilities": ["configurable", "location"],
+    "messageKeys": [
+      "SETTINGS_MODE_OVERRIDE",
+      "SETTINGS_SKY_OVERRIDE",
+      "SETTINGS_SHOOT_ENABLE",
+      "SETTINGS_SHOOT_MAX",
+      "SETTINGS_COMET_ENABLE",
+      "SETTINGS_COMET_MAX",
+      "SUNRISE_MINUTES",
+      "SUNSET_MINUTES",
+      "WIDGET_LEFT",
+      "WIDGET_RIGHT",
+      "WEATHER_TEMP",
+      "WEATHER_DESC",
+      "WEATHER_PRECIP",
+      "DATE_FMT",
+      "SETTINGS_BT_VIBE"
+    ],
+    "resources": {
+      "media": [
+        { "type": "png", "name": "EARTH",     "file": "images/earth_emery.png",      "targetPlatforms": ["emery"]  },
+        { "type": "png", "name": "EARTH",     "file": "images/earth_gabbro.png",     "targetPlatforms": ["gabbro"] },
+        { "type": "png", "name": "EARTH",     "file": "images/earth_basalt.png",     "targetPlatforms": ["basalt"] },
+        { "type": "png", "name": "EARTH",     "file": "images/earth_chalk.png",      "targetPlatforms": ["chalk"]  },
+        { "type": "png", "name": "FROM_MOON", "file": "images/from_moon_emery.png",  "targetPlatforms": ["emery"]  },
+        { "type": "png", "name": "FROM_MOON", "file": "images/from_moon_gabbro.png", "targetPlatforms": ["gabbro"] },
+        { "type": "png", "name": "FROM_MOON", "file": "images/from_moon_basalt.png", "targetPlatforms": ["basalt"] },
+        { "type": "png", "name": "FROM_MOON", "file": "images/from_moon_chalk.png",  "targetPlatforms": ["chalk"]  },
+        { "type": "png", "name": "FOOT_ICON",              "file": "images/foot_white.png" },
+        { "type": "png", "name": "HEART_ICON",             "file": "images/heart.png" },
+        { "type": "png", "name": "WEATHER_SUNNY",          "file": "images/weather/sunny.png" },
+        { "type": "png", "name": "WEATHER_RAINY",          "file": "images/weather/rainy.png" },
+        { "type": "png", "name": "WEATHER_CLOUDY",         "file": "images/weather/cloudy.png" },
+        { "type": "png", "name": "WEATHER_PARTLY_CLOUDY",  "file": "images/weather/partly_cloudy.png" },
+        { "type": "png", "name": "WEATHER_SNOWY",          "file": "images/weather/snowy.png" },
+        { "type": "png", "name": "WEATHER_FOGGY",          "file": "images/weather/foggy.png" },
+        { "type": "png", "name": "WEATHER_THUNDERY",       "file": "images/weather/thundery.png" },
+        { "type": "png", "name": "BATTERY_30",             "file": "images/battery/30.png" },
+        { "type": "png", "name": "BATTERY_50",             "file": "images/battery/50.png" },
+        { "type": "png", "name": "BATTERY_80",             "file": "images/battery/80.png" },
+        { "type": "png", "name": "BATTERY_FULL",           "file": "images/battery/full.png" },
+        { "type": "png", "name": "BATTERY_CHARGING_EMPTY", "file": "images/battery/charging_empty.png" },
+        { "type": "png", "name": "BATTERY_CHARGING_FULL",  "file": "images/battery/charging_full.png" },
+        { "type": "png", "name": "CLOUD_FALLING",          "file": "images/cloud_falling.png" },
+        { "type": "png", "name": "BLUETOOTH_DISABLED",     "file": "images/bluetooth_disabled.png" }
+      ]
+    }
+  }
+}
