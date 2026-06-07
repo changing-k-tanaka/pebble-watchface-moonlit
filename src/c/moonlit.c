@@ -238,6 +238,9 @@ typedef struct {
   bool    is_waxing;
 } MoonState;
 
+#define MOON_NEW_THRESHOLD   2
+#define MOON_FULL_THRESHOLD 98
+
 typedef struct {
   struct tm    current_time;
   VisualMode   mode;
@@ -290,6 +293,8 @@ typedef struct {
   // Bluetooth disconnected icon bitmap
   GBitmap     *bluetooth_disabled_bitmap;
   bool         bluetooth_connected;
+  int16_t      layout_date_y;   // dynamic Y for date row (shifts up when TQV visible)
+  int16_t      layout_time_y;   // dynamic Y for time row (shifts up when TQV visible)
 } AppState;
 
 static AppState s_state;
@@ -416,43 +421,24 @@ static VisualMode prv_get_visual_mode(int hour, int min) {
 // SECTION 5: MOON PHASE (integer arithmetic only)
 // ============================================================
 
-static int32_t prv_julian_day(int y, int m, int d) {
-  if (m <= 2) { y -= 1; m += 12; }
-  int32_t A = y / 100;
-  int32_t B = 2 - A + (A / 4);
-  int32_t yp = y + 4716;
-  int32_t mp = m + 1;
-  // floor(30.6001*(m+1)) via integer: (306001*mp)/10000
-  int32_t jd = (365 * yp) + (yp / 4) + (306001L * mp / 10000) + d + B - 1524;
-  return jd;
-}
-
-static MoonState prv_calc_moon_phase(int year, int mon, int day) {
-  int32_t jd = prv_julian_day(year, mon, day);
-  // Reference new moon: JD 2451550 (Jan 6, 2000)
-  // Synodic month: 29.53059 days => 29531 thousandths
-  int32_t days_since = jd - 2451550L;
-  // Normalize to positive
-  if (days_since < 0) {
-    int32_t months = ((-days_since) / 30) + 2;
-    days_since += months * 30;
-    // Fine-tune with synodic: add enough full synodic months
-    while (days_since < 0) days_since += 30;
-  }
-  // Position in cycle (0-29530 thousandths)
-  int32_t cycle_pos = (days_since * 1000L) % 29531L;
-  if (cycle_pos < 0) cycle_pos += 29531L;
+static MoonState prv_calc_moon_phase(time_t timestamp) {
+  // Reference new moon: 2000-01-06 18:14 UTC
+  // Synodic month: 29.530588853 days => 2551443 seconds
+  const int64_t ref_new_moon = 947182440LL;
+  const int64_t synodic_seconds = 2551443LL;
+  int64_t cycle_pos = ((int64_t)timestamp - ref_new_moon) % synodic_seconds;
+  if (cycle_pos < 0) cycle_pos += synodic_seconds;
 
   // Phase 0-7
-  uint8_t phase = (uint8_t)((cycle_pos * 8L) / 29531L);
+  uint8_t phase = (uint8_t)((cycle_pos * 8LL) / synodic_seconds);
 
   // Illumination 0-100
   uint8_t illum;
-  int32_t half = 14766L; // 29531/2
+  int64_t half = synodic_seconds / 2;
   if (cycle_pos <= half) {
-    illum = (uint8_t)(cycle_pos * 100L / half);
+    illum = (uint8_t)(cycle_pos * 100LL / half);
   } else {
-    illum = (uint8_t)((29531L - cycle_pos) * 100L / half);
+    illum = (uint8_t)((synodic_seconds - cycle_pos) * 100LL / half);
   }
 
   MoonState ms;
@@ -560,18 +546,25 @@ static void prv_draw_stars(GContext *ctx, VisualMode mode) {
 // SECTION 10: DRAWING — MOON
 // ============================================================
 
-// Returns x offset of shadow circle from moon center
-// Positive offset: shadow to the right (waning)
-// Negative offset: shadow to the left (waxing)
+// Returns the distance between the moon center and the shadow circle center.
+// 0% illumination => 0 (shadow centered over the disk)
+// 50% illumination => r (half moon)
+// 100% illumination => 2r (shadow fully off the disk)
 static int16_t prv_terminator_offset(uint8_t illumination, int r) {
-  // At 0%: offset=+r (shadow exactly on center covers all)
-  // At 100%: offset=-r (shadow far off, nothing covered)
-  return (int16_t)(r - (int32_t)illumination * 2 * r / 100);
+  return (int16_t)((int32_t)illumination * 2 * r / 100);
+}
+
+static bool prv_is_new_moon(const MoonState *m) {
+  return m->illumination <= MOON_NEW_THRESHOLD;
+}
+
+static bool prv_is_full_moon(const MoonState *m) {
+  return m->illumination >= MOON_FULL_THRESHOLD;
 }
 
 #if !PLATFORM_RICH
 static void prv_draw_moon_simple(GContext *ctx, MoonState *m, GColor shadow) {
-  if (m->phase == 0) return; // new moon hidden
+  if (prv_is_new_moon(m)) return; // near-new moon hidden
   GPoint center = GPoint(MOON_POS_X, MOON_POS_Y);
   int r = MOON_RADIUS;
 
@@ -579,7 +572,7 @@ static void prv_draw_moon_simple(GContext *ctx, MoonState *m, GColor shadow) {
   graphics_context_set_fill_color(ctx, GColorWhite);
   graphics_fill_circle(ctx, center, r);
 
-  if (m->phase == 4) return; // full moon: done
+  if (prv_is_full_moon(m)) return; // near-full moon: done
 
   // Shadow overlay circle — matches sky background
   int16_t off = prv_terminator_offset(m->illumination, r);
@@ -602,7 +595,7 @@ static void prv_draw_moon_simple(GContext *ctx, MoonState *m, GColor shadow) {
 
 #if PLATFORM_RICH
 static void prv_draw_moon_rich(GContext *ctx, MoonState *m, GColor shadow) {
-  if (m->phase == 0) return;
+  if (prv_is_new_moon(m)) return;
   GPoint center = GPoint(MOON_POS_X, MOON_POS_Y);
   int r = MOON_RADIUS;
 
@@ -615,7 +608,7 @@ static void prv_draw_moon_rich(GContext *ctx, MoonState *m, GColor shadow) {
   graphics_fill_circle(ctx, center, r);
 
   // Shadow overlay — matches sky background
-  if (m->phase != 4) {
+  if (!prv_is_full_moon(m)) {
     int16_t off = prv_terminator_offset(m->illumination, r);
     GPoint shadow_c;
     if (m->is_waxing) {
@@ -862,6 +855,10 @@ static void prv_update_health(void) {
 #ifdef PBL_HEALTH
   time_t end   = time(NULL);
   time_t start = time_start_of_today();
+  time_t hr_start = end - (5 * 60);
+  if (hr_start < start) {
+    hr_start = start;
+  }
   HealthServiceAccessibilityMask steps_mask =
     health_service_metric_accessible(HealthMetricStepCount, start, end);
   if (steps_mask & HealthServiceAccessibilityMaskAvailable) {
@@ -870,7 +867,7 @@ static void prv_update_health(void) {
     s_state.widget_steps = -1;
   }
   HealthServiceAccessibilityMask hr_mask =
-    health_service_metric_accessible(HealthMetricHeartRateBPM, start, end);
+    health_service_metric_accessible(HealthMetricHeartRateBPM, hr_start, end);
   if (hr_mask & HealthServiceAccessibilityMaskAvailable) {
     s_state.widget_heart_rate =
       (int32_t)health_service_peek_current_value(HealthMetricHeartRateBPM);
@@ -882,6 +879,18 @@ static void prv_update_health(void) {
   s_state.widget_heart_rate = -1;
 #endif
 }
+
+#ifdef PBL_HEALTH
+static void prv_health_handler(HealthEventType event, void *context) {
+  (void)event;
+  (void)context;
+
+  prv_update_health();
+  if (s_state.canvas_layer) {
+    layer_mark_dirty(s_state.canvas_layer);
+  }
+}
+#endif
 
 // ============================================================
 // SECTION 13c: WIDGET DRAWING
@@ -904,10 +913,10 @@ static void prv_draw_widget_slot(GContext *ctx, uint8_t type, GRect area, bool r
       break;
     case 2: // heart rate
       icon = s_state.heart_bitmap;
-      if (s_state.widget_heart_rate >= 0) {
+      if (s_state.widget_heart_rate > 0) {
         snprintf(text, sizeof(text), "%d", (int)s_state.widget_heart_rate);
       } else {
-        snprintf(text, sizeof(text), "--");
+        snprintf(text, sizeof(text), "-");
       }
       break;
     case 3: { // battery — icon + number + %
@@ -1059,8 +1068,8 @@ static void prv_canvas_update_proc(Layer *layer, GContext *ctx) {
     prv_draw_from_moon(ctx);
   }
 
-  // 4. Moon (skip new moon phase==0, skip daytime)
-  if (s_state.mode != MODE_DAYTIME && s_state.moon.phase != 0) {
+  // 4. Moon (skip near-new moon, skip daytime)
+  if (s_state.mode != MODE_DAYTIME && !prv_is_new_moon(&s_state.moon)) {
     GColor shadow = prv_sky_color(sky_mode);
 #if PLATFORM_RICH
     prv_draw_moon_rich(ctx, &s_state.moon, shadow);
@@ -1082,16 +1091,16 @@ static void prv_canvas_update_proc(Layer *layer, GContext *ctx) {
   GFont time_font = fonts_get_system_font(TIME_FONT);
   GFont info_font = fonts_get_system_font(INFO_FONT);
   graphics_draw_text(ctx, s_state.time_buf, time_font,
-                     GRect(1, TIME_Y_BOT + 1, SCREEN_W, TIME_H),
+                     GRect(1, s_state.layout_time_y + 1, SCREEN_W, TIME_H),
                      GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
   if (s_state.ampm_buf[0] != '\0') {
     GFont ampm_font = fonts_get_system_font(AMPM_FONT);
     graphics_draw_text(ctx, s_state.ampm_buf, ampm_font,
-                       GRect(AMPM_X + 1, TIME_Y_BOT + AMPM_Y_OFFSET + 1, AMPM_W, TIME_H - AMPM_Y_OFFSET),
+                       GRect(AMPM_X + 1, s_state.layout_time_y + AMPM_Y_OFFSET + 1, AMPM_W, TIME_H - AMPM_Y_OFFSET),
                        GTextOverflowModeWordWrap, GTextAlignmentLeft, NULL);
   }
   graphics_draw_text(ctx, s_state.date_buf, info_font,
-                     GRect(1, TIME_Y + 1, SCREEN_W, INFO_H),
+                     GRect(1, s_state.layout_date_y + 1, SCREEN_W, INFO_H),
                      GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
 
   // 8. Info widgets (left and right slots)
@@ -1182,13 +1191,7 @@ static void prv_tick_handler(struct tm *tick_time, TimeUnits changed) {
   s_state.mode = prv_get_visual_mode(tick_time->tm_hour, tick_time->tm_min);
   if      (s_settings.mode_override == 1) s_state.mode = MODE_DAYTIME;
   else if (s_settings.mode_override == 2) s_state.mode = MODE_MIDNIGHT;
-
-  if (changed & DAY_UNIT) {
-    s_state.moon = prv_calc_moon_phase(
-      tick_time->tm_year + 1900,
-      tick_time->tm_mon + 1,
-      tick_time->tm_mday);
-  }
+  s_state.moon = prv_calc_moon_phase(time(NULL));
 
   prv_update_text(tick_time);
   prv_update_health();
@@ -1203,6 +1206,47 @@ static void prv_tick_handler(struct tm *tick_time, TimeUnits changed) {
 #endif
   if (any_active) prv_start_anim_timer();
   layer_mark_dirty(s_state.canvas_layer);
+}
+
+// ============================================================
+// SECTION 16b: UNOBSTRUCTED AREA (Timeline Quick View)
+// ============================================================
+
+static void prv_update_layout(void) {
+  if (!s_state.window) return;
+  Layer *root = window_get_root_layer(s_state.window);
+  GRect ub = layer_get_unobstructed_bounds(root);
+  int16_t avail_bottom = (int16_t)(ub.origin.y + ub.size.h);
+
+  // Maintain original 11px bottom margin, shift both rows up together
+  int16_t time_y = avail_bottom - TIME_H - 11;
+  int16_t date_y = time_y - INFO_H + 4;  // mirrors TIME_Y_BOT = TIME_Y + INFO_H - 4
+
+  s_state.layout_time_y = time_y;
+  s_state.layout_date_y = date_y;
+
+  if (s_state.time_layer) {
+    layer_set_frame(text_layer_get_layer(s_state.time_layer),
+                    GRect(0, time_y, SCREEN_W, TIME_H));
+  }
+  if (s_state.ampm_layer) {
+    layer_set_frame(text_layer_get_layer(s_state.ampm_layer),
+                    GRect(AMPM_X, time_y + AMPM_Y_OFFSET, AMPM_W, TIME_H - AMPM_Y_OFFSET));
+  }
+  if (s_state.date_layer) {
+    layer_set_frame(text_layer_get_layer(s_state.date_layer),
+                    GRect(0, date_y, SCREEN_W, INFO_H));
+  }
+
+  if (s_state.canvas_layer) layer_mark_dirty(s_state.canvas_layer);
+}
+
+static void prv_unobstructed_change(AnimationProgress progress, void *context) {
+  prv_update_layout();
+}
+
+static void prv_unobstructed_did_change(void *context) {
+  prv_update_layout();
 }
 
 // ============================================================
@@ -1294,8 +1338,10 @@ static void prv_window_load(Window *window) {
   s_state.mode = prv_get_visual_mode(t->tm_hour, t->tm_min);
   if      (s_settings.mode_override == 1) s_state.mode = MODE_DAYTIME;
   else if (s_settings.mode_override == 2) s_state.mode = MODE_MIDNIGHT;
-  s_state.moon = prv_calc_moon_phase(t->tm_year + 1900, t->tm_mon + 1, t->tm_mday);
+  s_state.moon = prv_calc_moon_phase(now);
   prv_update_text(t);
+  prv_update_health();
+  prv_update_layout();
 }
 
 static void prv_window_unload(Window *window) {
@@ -1439,16 +1485,27 @@ static void prv_init(void) {
   });
   window_stack_push(s_state.window, true);
   tick_timer_service_subscribe(MINUTE_UNIT, prv_tick_handler);
+  unobstructed_area_service_subscribe((UnobstructedAreaHandlers){
+    .change      = prv_unobstructed_change,
+    .did_change  = prv_unobstructed_did_change,
+  }, NULL);
   connection_service_subscribe((ConnectionHandlers){
     .pebble_app_connection_handler = prv_bluetooth_handler,
   });
   app_message_register_inbox_received(prv_inbox_received);
   app_message_open(256, 0);
+#ifdef PBL_HEALTH
+  health_service_events_subscribe(prv_health_handler, NULL);
+#endif
 }
 
 static void prv_deinit(void) {
   tick_timer_service_unsubscribe();
+  unobstructed_area_service_unsubscribe();
   connection_service_unsubscribe();
+#ifdef PBL_HEALTH
+  health_service_events_unsubscribe();
+#endif
   window_destroy(s_state.window);
 }
 
